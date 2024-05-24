@@ -1,0 +1,716 @@
+#include <iostream>
+#include <string.h>
+#include <stdlib.h>
+#include <vector>
+#include <fstream>
+#include <set>
+
+using namespace std;
+
+const int MIN_BRANCHING_FACTOR = 4; // Set your desired minimum branching factor here
+
+class Product {
+public:
+    int id;
+    string name;
+    string category; // New field for category
+    double price;
+
+    Product(int id, const string& name, const string& category, double price)
+        : id(id), name(name), category(category), price(price) {}
+};
+
+class ShoppingCart
+{
+public:
+    struct CartItem {
+        Product* product;
+        int quantity;
+
+        CartItem(Product* p, int q) : product(p), quantity(q) {}
+    };
+
+    vector<CartItem> items;
+
+    void addProduct(Product* product, int quantity)
+    {
+        // Check if the product is already in the cart
+        for (auto& item : items) {
+            if (item.product == product) {
+                item.quantity += quantity;
+                return;
+            }
+        }
+
+        // If not, add a new cart item
+        items.push_back({ product, quantity });
+    }
+};
+
+
+class BTreeNode {
+public:
+    int* keys;
+    Product** products;
+    BTreeNode** C;
+    int n;
+    bool leaf;
+
+    BTreeNode(bool _leaf = true);
+    ~BTreeNode();
+
+    int findKey(int k);
+    void insertNonFull(int k, Product* product);
+    void splitChild(int i, BTreeNode* y);
+    void traverse();
+    Product* search(int k);
+};
+
+class BTree {
+public:
+    BTreeNode* root;
+
+    BTree() { root = NULL; }
+
+    void insertProduct(int id, const string& name, const string& category, double price);
+    void displayCatalog();
+    Product* searchProduct(int id);
+    void displayProductsByCategory(const string& category);
+    void displayProductsByCategory(BTreeNode* node, const string& category);
+};
+
+BTreeNode::BTreeNode(bool _leaf) {
+    leaf = _leaf;
+    keys = new int[2 * MIN_BRANCHING_FACTOR - 1];
+    products = new Product*[2 * MIN_BRANCHING_FACTOR - 1];
+    C = new BTreeNode*[2 * MIN_BRANCHING_FACTOR];
+    n = 0;
+}
+
+BTreeNode::~BTreeNode() {
+    delete[] keys;
+    delete[] products;
+    delete[] C;
+}
+
+int BTreeNode::findKey(int k) {
+    int idx = 0;
+    while (idx < n && keys[idx] < k)
+        idx++;
+    return idx;
+}
+
+void BTreeNode::insertNonFull(int k, Product* product) {
+    int i = n - 1;
+    if (leaf) {
+        while (i >= 0 && keys[i] > k) {
+            keys[i + 1] = keys[i];
+            products[i + 1] = products[i];
+            i--;
+        }
+        keys[i + 1] = k;
+        products[i + 1] = product;
+        n++;
+    } else {
+        while (i >= 0 && keys[i] > k)
+            i--;
+        if (C[i + 1]->n == 2 * MIN_BRANCHING_FACTOR - 1) {
+            splitChild(i + 1, C[i + 1]);
+            if (keys[i + 1] < k)
+                i++;
+        }
+        C[i + 1]->insertNonFull(k, product);
+    }
+}
+
+void BTreeNode::splitChild(int i, BTreeNode* y) {
+    BTreeNode* z = new BTreeNode(y->leaf);
+    int t = MIN_BRANCHING_FACTOR - 1;
+    z->n = t;
+
+    for (int j = 0; j < t; j++) {
+        z->keys[j] = y->keys[j + t];
+        z->products[j] = y->products[j + t];
+    }
+
+    if (!y->leaf) {
+        for (int j = 0; j < t + 1; j++)
+            z->C[j] = y->C[j + t];
+    }
+
+    y->n = t - 1;
+
+    for (int j = n; j >= i + 1; j--)
+        C[j + 1] = C[j];
+
+    C[i + 1] = z;
+
+    for (int j = n - 1; j >= i; j--) {
+        keys[j + 1] = keys[j];
+        products[j + 1] = products[j];
+    }
+
+    keys[i] = y->keys[t - 1];
+    products[i] = y->products[t - 1];
+
+    n++;
+}
+
+void BTreeNode::traverse() {
+    int i;
+    for (i = 0; i < n; i++) {
+        if (!leaf)
+            C[i]->traverse();
+        cout << "ID: " << keys[i] << " Name: " << products[i]->name
+             << " Category: " << products[i]->category << " Price: $" << products[i]->price << endl;
+    }
+    if (!leaf)
+        C[i]->traverse();
+}
+
+Product* BTreeNode::search(int k) {
+    int i = 0;
+    while (i < n && k > keys[i])
+        i++;
+
+    if (keys[i] == k)
+        return products[i];
+
+    if (leaf)
+        return nullptr;
+
+    return C[i]->search(k);
+}
+
+void BTree::insertProduct(int id, const string& name, const string& category, double price) {
+    Product* product = new Product(id, name, category, price);
+
+    if (!root) {
+        root = new BTreeNode(true);
+        root->keys[0] = id;
+        root->products[0] = product;
+        root->n = 1;
+    } else {
+        if (root->n == 2 * MIN_BRANCHING_FACTOR - 1) {
+            BTreeNode* s = new BTreeNode(false);
+            s->C[0] = root;
+            s->splitChild(0, root);
+            int i = 0;
+            if (s->keys[0] < id)
+                i++;
+            s->C[i]->insertNonFull(id, product);
+            root = s;
+        } else {
+            root->insertNonFull(id, product);
+        }
+    }
+}
+
+void BTree::displayCatalog() {
+    if (root)
+        root->traverse();
+    else
+        cout << "Catalog is empty." << endl;
+}
+
+Product* BTree::searchProduct(int id) {
+    if (root)
+        return root->search(id);
+    return nullptr;
+}
+
+void BTree::displayProductsByCategory(const string& category) {
+    if (root)
+        displayProductsByCategory(root, category);
+    else
+        cout << "Catalog is empty." << endl;
+}
+
+void BTree::displayProductsByCategory(BTreeNode* node, const string& category) {
+    int i = 0;
+
+    // Traverse the node and its children
+    while (i < node->n) {
+        // If the current product's category is equal to the specified category, print it
+        if (node->products[i]->category == category) {
+            cout << "ID: " << node->products[i]->id << " Name: " << node->products[i]->name
+                 << " Category: " << node->products[i]->category << " Price: $" << node->products[i]->price << endl;
+        }
+
+        // If not, recursively search in the appropriate subtree
+        if (!node->leaf && (i == 0 || node->products[i]->category >= category)) {
+            displayProductsByCategory(node->C[i], category);
+        }
+
+        i++;
+    }
+
+    // If there are more subtrees to explore, continue searching
+    if (!node->leaf) {
+        displayProductsByCategory(node->C[i], category);
+    }
+}
+
+void loadCatalogFromFile(const string& filename, BTree& catalog) {
+    ifstream inputFile(filename);
+
+    if (!inputFile.is_open()) {
+        cerr << "Error opening file." << endl;
+        return;
+    }
+
+    int id;
+    string name, category;
+    double price;
+
+    while (inputFile >> id >> name >> category >> price) {
+        // Check if the product ID already exists in the catalog
+        Product* existingProduct = catalog.searchProduct(id);
+        if (!existingProduct) {
+            catalog.insertProduct(id, name, category, price);
+        }
+    }
+
+    inputFile.close();
+}
+
+void addProductAndUpdateFile(const string& filename, BTree& catalog, int id, const string& name, const string& category, double price) {
+    // Check if the product ID already exists in the catalog
+    Product* existingProduct = catalog.searchProduct(id);
+
+    if (existingProduct) {
+        cout << "Product with ID " << id << " already exists in the catalog." << endl;
+        return;
+    }
+
+    // Insert the product into the catalog
+    catalog.insertProduct(id, name, category, price);
+
+    // Open the file for appending
+    ofstream outputFile(filename, ios::app);
+
+    if (!outputFile.is_open()) {
+        cerr << "Error opening file." << endl;
+        return;
+    }
+
+    // Append the new product to the file
+    outputFile << id << ' ' << name << ' ' << category << ' ' << price << endl;
+
+    outputFile.close();
+}
+
+// User management code
+struct User {
+    //char username[50];
+    //char password[50];
+    string username;
+    string password;
+    struct User* left;
+    struct User* right;
+    int height;
+};
+
+int height(struct User* node) {
+    if (node == NULL)
+        return 0;
+    return node->height;
+}
+
+int balanceFactor(struct User* node) {
+    if (node == NULL)
+        return 0;
+    return height(node->left) - height(node->right);
+}
+
+struct User* rightRotate(struct User* y) {
+    struct User* x = y->left;
+    struct User* T2 = x->right;
+
+    x->right = y;
+    y->left = T2;
+
+    y->height = 1 + max(height(y->left), height(y->right));
+    x->height = 1 + max(height(x->left), height(x->right));
+
+    return x;
+}
+
+struct User* leftRotate(struct User* x) {
+    struct User* y = x->right;
+    struct User* T2 = y->left;
+
+    y->left = x;
+    x->right = T2;
+
+    x->height = 1 + max(height(x->left), height(x->right));
+    y->height = 1 + max(height(y->left), height(y->right));
+
+    return y;
+}
+
+struct User* insert(struct User* root, string username, string password) {
+    if (root == NULL) {
+        struct User* newNode = new User;
+        newNode->username = username;
+        newNode->password = password;
+        newNode->left = NULL;
+        newNode->right = NULL;
+        newNode->height = 1;
+        return newNode;
+    }
+
+    if (username == root->username || password == root->password) {
+        printf("\n\t\t\tWarning: Duplicate username or password. User not inserted.\n");
+        return root;
+    }
+
+    if (username < root->username)
+        root->left = insert(root->left, username, password);
+    else if (username > root->username)
+        root->right = insert(root->right, username, password);
+
+    root->height = 1 + max(height(root->left), height(root->right));
+    int balance = balanceFactor(root);
+
+    if (balance > 1) {
+        if (username < root->left->username) {
+            return rightRotate(root);
+        }
+    }
+
+    if (balance < -1) {
+        if (username > root->right->username) {
+            return leftRotate(root);
+        }
+    }
+
+    return root;
+}
+
+struct User* search(struct User* root, string username, string password) {
+    if (root == NULL)
+        return NULL;
+    //int cmp = strcmp(username, root->username);
+    if (username == root->username && password == root->password)
+        return root;
+    if (username < root->username)
+        return search(root->left, username, password);
+    else
+        return search(root->right, username, password);
+}
+
+void writeUserDataToFile(struct User* root, ofstream& file) {
+    if (root != NULL) {
+        writeUserDataToFile(root->left, file);
+        file << root->username << " " << root->password << endl;
+        writeUserDataToFile(root->right, file);
+    }
+}
+
+struct User* loadUsersFromFile(const string& filename1) {
+    struct User* root = NULL;
+    ifstream file(filename1);
+
+    if (!file.is_open()) {
+        cerr << "Error opening file: " << filename1 << endl;
+        return NULL;
+    }
+
+    string username, password;
+    set<string> uniqueUsernames;
+    while (file >> username >> password) {
+        if (uniqueUsernames.find(username) == uniqueUsernames.end()) {
+            uniqueUsernames.insert(username);
+            root = insert(root, username, password); // Assuming you have a valid insert function
+        }
+    }
+
+    file.close();
+    return root; // Return the root of the loaded user data BST
+}
+
+
+int main() {
+    BTree catalog;
+    string filename = "products.txt";
+    string filename1 = "user_data.txt";
+    struct User* root = NULL;
+
+    // Inserting users
+    root = insert(root, "user1", "password1");
+    root = insert(root, "user2", "password2");
+    root = insert(root, "user3", "password3");
+    root = insert(root, "user4", "password4");
+
+    loadCatalogFromFile(filename, catalog);
+
+    begin:
+    int n;
+    string a, b;
+    string d,e;
+    cout << "\n\t\t\tWhat do you want to perform?";
+    cout << "\n\t\t\t\t1.SIGN UP(Create your account)";
+    cout << "\n\t\t\t\t2.LOG IN(Search your user id)";
+    cout << "\n\t\t\t\t3.Admin Login";
+    cout << "\n\t\t\tEnter your choice: ";
+    cin >> n;
+
+    if (n == 1) {
+        cout << "\n\n\t\t\tEnter the username: ";
+        cin >> a;
+        cout << "\n\t\t\tEnter the password: ";
+        cin >> b;
+        root = loadUsersFromFile(filename1);
+        root = insert(root, a, b);
+
+        // Open a file for writing user data
+        ofstream file(filename1, ios::app);
+        if (file.is_open()) {
+            writeUserDataToFile(root, file);
+            file.close();
+        } else {
+            cout << "Error opening file" << endl;
+        }
+    }
+
+    if (n == 2) {
+        cout << "\n\n\t\t\tEnter your username: ";
+        cin >> a;
+        cout << "\n\t\t\tEnter your password: ";
+        cin >> b;
+        root = loadUsersFromFile(filename1);
+        struct User* loggedInUser = search(root, a, b);
+        if (loggedInUser != NULL) {
+            cout << "\n\t\t\t\tLogin successful! Welcome " << a << endl;
+            //loadCatalogFromFile(filename, catalog);
+            cout << "Welcome to the Product Catalog!" << endl;
+            catalog.displayCatalog();
+            
+            ShoppingCart cart;
+            
+            int choice;
+            do {
+            cout << "\nMenu:" << endl;
+            cout << "1. Search for a Product" << endl;
+            cout << "2. Display Products by Category" << endl;
+            cout << "3. Add product to cart" << endl;
+            cout << "4. Display the Product from Cart" << endl;
+            cout << "5. Exit" << endl;
+            cout << "Enter your choice: ";
+            cin >> choice;
+            switch (choice) {
+                case 1: {
+                int id;
+                cout << "Enter product ID to search: ";
+                cin >> id;
+                Product* product = catalog.searchProduct(id);
+                if (product) {
+                    cout << "Product Found:" << endl;
+                    cout << "ID: " << product->id << " Name: " << product->name << " Category: " << product->category
+                         << " Price: $" << product->price << endl;
+                } else {
+                    cout << "Product not found." << endl;
+                }
+                if (product) {
+                    int choice1;
+                    cout << "1.Add Products to Cart" << endl;
+                    cout << "2.Exit" << endl;
+                    cout << "Enter your choice: ";
+                    cin >> choice1;
+                    switch(choice1)
+                    {
+                    case 1:
+                    {
+                        int id;
+                        int quantity;
+                        cout << "Enter product ID to add to cart: ";
+                        cin >> id;
+                        cout << "Enter quantity: ";
+                        cin >> quantity;
+
+                        Product* product = catalog.searchProduct(id);
+                        if (product) {
+                            cart.addProduct(product, quantity);  // Add the specified quantity of the product to the cart
+                            cout << "Product added to the cart." << endl;
+                        } else {
+                            cout << "Product not found." << endl;
+                        }
+                        break;
+                    }
+                case 2:
+                {
+                    break;
+                }
+                }
+            }
+            break;
+            }
+            case 2: {
+                string category;
+                cout << "Enter category to display products: ";
+                cin.ignore();
+                getline(cin, category);
+                catalog.displayProductsByCategory(category);
+                 int choice1;
+                cout << "1.Add Products to Cart" << endl;
+                cout << "2.Exit" << endl;
+                cout << "Enter your choice: ";
+                cin >> choice1;
+                switch(choice1)
+                {
+
+                case 1:
+                {
+                    int id;
+                    int quantity;
+                    cout << "Enter product ID to add to cart: ";
+                    cin >> id;
+                    cout << "Enter quantity: ";
+                    cin >> quantity;
+
+                    Product* product = catalog.searchProduct(id);
+                    if (product) {
+                        cart.addProduct(product, quantity);  // Add the specified quantity of the product to the cart
+                        cout << "Product added to the cart." << endl;
+                    } else {
+                        cout << "Product not found." << endl;
+                    }
+                    break;
+                }
+                case 2:
+                {
+                    break;
+                }
+            }
+            break;
+            }
+            case 3: {
+                int id;
+                int quantity;
+                cout << "Enter product ID to add to cart: ";
+                cin >> id;
+                cout << "Enter quantity: ";
+                cin >> quantity;
+
+                Product* product = catalog.searchProduct(id);
+                if (product) {
+                    cart.addProduct(product, quantity);  // Add the specified quantity of the product to the cart
+                    cout << "Product added to the cart." << endl;
+                } else {
+                    cout << "Product not found." << endl;
+                }
+                break;
+            }
+            case 4:
+                {
+                    cout << "Shopping Cart Contents:" << endl;
+                    double total = 0.0;
+                    for (const auto& item : cart.items)
+                    {
+                        cout << "ID: " << item.product->id << " Name: " << item.product->name << " Category: " << item.product->category << " Price: $" << item.product->price << " Quantity: " << item.quantity << endl;
+                        total += item.product->price * item.quantity;
+                    }
+                    cout << "Total: $" << total << endl;
+                    break;
+                }
+            case 5:
+                cout << "Exiting the program." << endl;
+                break;
+            default:
+                cout << "Invalid choice. Please try again." << endl;
+            }
+        } while (choice != 5);
+        }
+        else {
+            printf("\n\t\t\t\tLogin failed. Invalid username or password.\n");
+        }
+    }
+
+    if (n == 3) {
+        cout << "\n\n\t\t\tAdmin Login:";
+        cout << "\n\t\t\tEnter your username: ";
+        cin >> d;
+        cout << "\n\t\t\tEnter your password: ";
+        cin >> e;
+        if (d == "admin" && e == "alogin") {
+            loadCatalogFromFile(filename, catalog);
+
+            cout << "Welcome to the Product Catalog!" << endl;
+            int choice;
+
+            do {
+            cout << "\nMenu:" << endl;
+            cout << "1. Add a Product" << endl;
+            cout << "2. Display Catalog" << endl;
+            cout << "3. Search for a Product" << endl;
+            cout << "4. Display Products by Category" << endl;
+            cout << "5. Exit" << endl;
+            cout << "Enter your choice: ";
+            cin >> choice;
+
+            switch (choice) {
+            case 1: {
+                int id;
+                string name;
+                string category;
+                double price;
+                cout << "Enter product ID: ";
+                cin >> id;
+                cout << "Enter product name: ";
+                cin.ignore();
+                getline(cin, name);
+                cout << "Enter product category: ";
+                getline(cin, category);
+                cout << "Enter product price: ";
+                cin >> price;
+                //catalog.insertProduct(id, name, category, price);
+                addProductAndUpdateFile(filename, catalog, id, name, category, price);
+                break;
+            }
+            case 2:
+                catalog.displayCatalog();
+                break;
+            case 3: {
+                int id;
+                cout << "Enter product ID to search: ";
+                cin >> id;
+                Product* product = catalog.searchProduct(id);
+                if (product) {
+                    cout << "Product Found:" << endl;
+                    cout << "ID: " << product->id << " Name: " << product->name << " Category: " << product->category
+                         << " Price: $" << product->price << endl;
+                } else {
+                    cout << "Product not found." << endl;
+                }
+                break;
+            }
+            case 4: {
+                string category;
+                cout << "Enter category to display products: ";
+                cin.ignore();
+                getline(cin, category);
+                catalog.displayProductsByCategory(category);
+                break;
+            }
+            case 5:
+                cout << "Exiting the program." << endl;
+                break;
+            default:
+                cout << "Invalid choice. Please try again." << endl;
+        }
+    } while (choice != 5);
+    }
+    else {
+        printf("\n\t\t\t\tAdmin login failed. Invalid username or password.\n");
+    }
+    }
+
+    char p;
+    cout << "Do you want to continue? (y/n): ";
+    cin >> p;
+    if (p == 'y' || p == 'Y')
+        goto begin;
+
+    return 0;
+}
